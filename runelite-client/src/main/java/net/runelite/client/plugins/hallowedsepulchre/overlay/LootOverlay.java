@@ -78,7 +78,6 @@ public class LootOverlay extends OverlayPanel {
         return super.render(graphics);
     }
 
-
     private void addLootComponent(final String left, final Supplier<String> right) {
         LineComponent lootComponent = LineComponent.builder()
                 .left(left)

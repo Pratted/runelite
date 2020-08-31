@@ -40,7 +40,8 @@ public class HallowedSepulchreFloor {
     private Duration stopwatchOffset = Duration.of(1, RSTimeUnit.GAME_TICKS);
 
     @Getter
-    private final int floorNumber;
+    @Setter
+    private int floorNumber;
 
     private boolean hasTimeExpired = false;
 

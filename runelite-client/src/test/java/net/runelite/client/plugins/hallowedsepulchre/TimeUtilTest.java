@@ -1,6 +1,19 @@
 package net.runelite.client.plugins.hallowedsepulchre;
 
+import org.junit.Test;
+
+import java.awt.*;
+
+import static org.junit.Assert.assertTrue;
+
 public class TimeUtilTest {
+
+    @Test
+    public void eric() {
+        Rectangle rectangle = new Rectangle(2200, 6048, 128, 128);
+
+        assertTrue(rectangle.contains(2240, 6100));
+    }
 //
 //
 //    private static int X = CollisionDataFlag.Flag.BLOCK_MOVEMENT_FLOOR.getFlag();

@@ -1,12 +1,12 @@
 package net.runelite.client.plugins.hallowedsepulchre.model;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.client.plugins.hallowedsepulchre.HallowedSepulchreTimetracker;
 
 import javax.annotation.Nullable;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -23,8 +23,14 @@ public class HallowedSepulchreSession {
 
     private Optional<HallowedSepulchreFloor> currentFloor = Optional.empty();
 
-    // Index 0 = Floor 1, Index 1 = Floor 2...
-    private List<Duration> completedFloorDurations = new ArrayList<>();
+    private Map<Integer, CompletedFloor> completedFloors = new HashMap<>();
+
+    @Getter
+    private HallowedSepulchreTimetracker timeTracker = new HallowedSepulchreTimetracker();
+
+    public void putCompletedFloor(CompletedFloor completedFloor) {
+        completedFloors.put(completedFloor.getFloorNumber(), completedFloor);
+    }
 
     // The overall duration recorded by the server.
     // This shouldn't be set until after the server posts the completion time
@@ -44,43 +50,33 @@ public class HallowedSepulchreSession {
         this.overallDuration = Optional.of(overallDuration);
     }
 
-    public void addCompletedFloorDuration(final Duration floorDuration) {
-        completedFloorDurations.add(floorDuration);
-    }
+//    public void addCompletedFloorDuration(final Duration floorDuration) {
+//        completedFloorDurations.add(floorDuration);
+//    }
 
     /**
      * @return The overall time recorded by the server.
      */
     public Duration getOverallDuration() {
         // Prioritize the server time, otherwise use our own calculated version.
-        return overallDuration.orElse(getCumulativeDuration());
-    }
-
-    /**
-     * @return The total amount of the time the player has spent on all floors
-     * including the current floor.
-     */
-    private Duration getCumulativeDuration() {
-        return completedFloorDurations.stream()
-                .reduce(Duration.ZERO, Duration::plus)
-                .plus(getCurrentFloorDuration());
+        return overallDuration.orElse(timeTracker.getOverallDuration());
     }
 
     /**
      * @return The amount of the time the player has spent on the current floor.
      */
     private Duration getCurrentFloorDuration() {
-        return currentFloor
-                .map(HallowedSepulchreFloor::getDuration)
-                .orElse(Duration.ZERO);
+        return timeTracker.getCurrentFloorDuration();
     }
 
     /**
      * @return The durations for each of the completed floors in order starting
-     * with floor 1.
+     * with the lowest floor.
      */
-    public List<Duration> getCompletedFloorDurations() {
-        return completedFloorDurations;
+    public List<CompletedFloor> getCompletedFloorDurations() {
+        return completedFloors.values().stream()
+                .sorted(Comparator.comparingInt(CompletedFloor::getFloorNumber))
+                .collect(Collectors.toList());
     }
 
     /**

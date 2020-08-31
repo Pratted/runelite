@@ -1,9 +1,13 @@
 package net.runelite.client.plugins.hallowedsepulchre;
 
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
 import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreFloor;
 import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreSession;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -15,7 +19,7 @@ import static com.google.common.base.Preconditions.checkState;
  * {@link HallowedSepulchreSession}.
  * <p/>
  * Throughout the course of the Hallowed Sepulchre, different events create,
- * modify or destroy the state of a session. The events are not always
+ * modify or destroy the state of a session. These events are not always
  * synchronous, so managing the state of the session is not a simple task. The
  * {@link SessionManager} attempts to normalize those actions by managing
  * the creation and destruction of a session as well as providing access to it.
@@ -39,16 +43,36 @@ public class SessionManager {
      * @return The current or upcoming floor.
      * @throws IllegalStateException When the session is not present.
      */
-    public HallowedSepulchreFloor getCurrentOrUpcomingFloor() {
+    public HallowedSepulchreFloor getCurrentOrUpcomingFloor(Client client) {
         checkState(currentSession.isPresent(), "The current session is not present.");
 
-        if (!currentSession.get().getCurrentFloor().isPresent()) {
-            log.debug("Creating next floor.");
-            int nextFloorNumber = currentSession.get().getCompletedFloorDurations().size() + 1;
-            currentSession.get().setCurrentFloor(new HallowedSepulchreFloor(nextFloorNumber));
+        HallowedSepulchreSession session = currentSession.get();
+
+        if (!session.getCurrentFloor().isPresent()) {
+            log.debug("Creating floor.");
+
+            int floorNumber = getCurrentFloorNumber(client);
+            HallowedSepulchreFloor floor = new HallowedSepulchreFloor(floorNumber);
+
+            session.setCurrentFloor(floor);
         }
 
-        return currentSession.get().getCurrentFloor().get();
+        return session.getCurrentFloor().get();
+    }
+
+    private static int getCurrentFloorNumber(Client client) {
+        try {
+            // The floor number should be derived from the player's location.
+            // Don't assume player starts on floor 1 because the plugin
+            // can be started in the middle of the floor. For example, if the
+            // plugin is started in the middle of Floor 4, we don't want to
+            // display it as Floor 1.
+            return HallowedSepulchreUtil.getCurrentFloorNumber(client)
+                    .orElseThrow(() -> new IllegalStateException("Unable to determine floor number from location."));
+        } catch (IllegalStateException e) {
+            log.error("Unable to determine floor number from location.", e);
+            return -1;
+        }
     }
 
     /**
@@ -102,11 +126,6 @@ public class SessionManager {
      */
     public Optional<HallowedSepulchreFloor> getCurrentFloor() {
         return currentSession.flatMap(HallowedSepulchreSession::getCurrentFloor);
-    }
-
-    boolean isOnFloor() {
-        return currentSession.isPresent() &&
-                currentSession.get().getCurrentFloor().isPresent();
     }
 
     /**

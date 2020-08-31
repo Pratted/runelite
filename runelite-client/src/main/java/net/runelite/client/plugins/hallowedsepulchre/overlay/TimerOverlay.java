@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.client.plugins.hallowedsepulchre.HallowedSepulchreConfig;
 import net.runelite.client.plugins.hallowedsepulchre.HallowedSepulchrePlugin;
+import net.runelite.client.plugins.hallowedsepulchre.HallowedSepulchreTimetracker;
+import net.runelite.client.plugins.hallowedsepulchre.model.CompletedFloor;
 import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreFloor;
 import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreSession;
 import net.runelite.client.ui.overlay.OverlayMenuEntry;
@@ -16,8 +18,6 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
 import javax.inject.Inject;
 import java.awt.*;
 import java.time.Duration;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -39,7 +39,7 @@ public class TimerOverlay extends OverlayPanel {
             HallowedSepulchreConfig config) {
         super(plugin);
 
-        setPosition(OverlayPosition.TOP_RIGHT);
+        setPosition(OverlayPosition.TOP_LEFT);
         setPriority(OverlayPriority.LOW);
 
         this.client = client;
@@ -53,9 +53,10 @@ public class TimerOverlay extends OverlayPanel {
     public Dimension render(Graphics2D graphics) {
 
         // Nothing to render.
-        if (!plugin.isInLobby() && !plugin.getActiveSession().isPresent()) {
+        if (!plugin.isInLobby() && !plugin.isInSepulchre()) {
             return super.render(graphics);
         }
+
 
         // We only want to show HS information if they are in the HS or in the lobby.
         if (plugin.isInLobby() || plugin.getMostRecentSession().isPresent()) {
@@ -66,28 +67,13 @@ public class TimerOverlay extends OverlayPanel {
 
             if (maybeSession.isPresent()) {
                 final HallowedSepulchreSession session = maybeSession.get();
+                final HallowedSepulchreTimetracker timetracker = session.getTimeTracker();
 
                 final List<LineComponent> completedFloorTimes = new ArrayList<>();
                 Optional<LineComponent> currentFloorTime = Optional.empty();
                 Optional<LineComponent> overallTime = Optional.empty();
 
-                if (config.showCompletedFloorTimes()) {
-                    int floorNumber = 1;
-
-                    Duration cumulative = Duration.ZERO;
-
-                    for (final Duration duration : session.getCompletedFloorDurations()) {
-                        cumulative = cumulative.plus(duration);
-
-                        completedFloorTimes.add(LineComponent.builder()
-                                .left(String.format("Floor %d:", floorNumber++))
-                                .right(String.format("%s (%s)", toMMSS(duration), toMMSS(cumulative)))
-                                .build());
-                    }
-                }
-
                 if (config.showFloorTime()) {
-
                     if (session.getCurrentFloor().isPresent()) {
                         final HallowedSepulchreFloor floor = session.getCurrentFloor().get();
 
@@ -98,7 +84,7 @@ public class TimerOverlay extends OverlayPanel {
                         currentFloorTime = Optional.of(LineComponent.builder()
                                 .left(String.format("Floor %d:", floor.getFloorNumber()))
                                 .leftColor(textColor)
-                                .right(toMMSS(floor.getDuration()))
+                                .right(toMMSS(timetracker.getCurrentFloorDuration()))
                                 .rightColor(textColor)
                                 .build());
                     }
@@ -113,6 +99,34 @@ public class TimerOverlay extends OverlayPanel {
                             .rightColor(Color.YELLOW)
                             .build());
                 }
+
+                if (shouldDisplayFloorTimes()) {
+                    for (final CompletedFloor completedFloor : session.getCompletedFloorDurations()) {
+                        final String durationString = shouldDisplaySplits() ?
+                                String.format("%s (%s)", toMMSS(completedFloor.getDuration()), toMMSS(completedFloor.getSplit())) :
+                                String.format("%s", toMMSS(completedFloor.getDuration()));
+
+                        completedFloorTimes.add(LineComponent.builder()
+                                .left(String.format("Floor %d:", completedFloor.getFloorNumber()))
+                                .right(durationString)
+                                .build());
+                    }
+                }
+
+//                if (config.showCompletedFloorTimes()) {
+//                    int floorNumber = 1;
+//
+//                    Duration cumulative = Duration.ZERO;
+//
+//                    for (final Duration duration : session.getCompletedFloorDurations()) {
+//                        cumulative = cumulative.plus(duration);
+//
+//                        completedFloorTimes.add(LineComponent.builder()
+//                                .left(String.format("Floor %d:", floorNumber++))
+//                                .right(String.format("%s (%s)", toMMSS(duration), toMMSS(cumulative)))
+//                                .build());
+//                    }
+//                }
 
                 // Add the rows in the correct order.
                 completedFloorTimes.forEach(row -> panelComponent.getChildren().add(row));
@@ -132,12 +146,43 @@ public class TimerOverlay extends OverlayPanel {
         return super.render(graphics);
     }
 
+    private boolean shouldDisplayFloorTimes() {
+        switch (config.displayCompletedFloorTimes()) {
+            case IN_LOBBY:
+                return plugin.isInLobby();
+            case ALWAYS:
+                return plugin.isInLobby() || plugin.isInSepulchre();
+            default:
+                return false;
+        }
+    }
+
+    private boolean shouldDisplaySplits() {
+        switch (config.displaySplits()) {
+            case IN_LOBBY:
+                return plugin.isInLobby() && shouldDisplayFloorTimes();
+            case ALWAYS:
+                return (plugin.isInLobby() || plugin.isInSepulchre()) && shouldDisplayFloorTimes();
+            default:
+                return false;
+        }
+    }
+
     private static String toMMSS(final Duration duration) {
         if (duration.equals(Duration.ZERO)) {
             return "--";
         }
 
-        return LocalTime.ofSecondOfDay(duration.getSeconds())
-                .format(DateTimeFormatter.ofPattern("mm:ss"));
+        long minutes = duration.getSeconds() / 60;
+        long seconds = duration.getSeconds() % 60;
+
+        long tenthsOfSecond = (duration.toMillis() % 1000) / 100;
+
+        // round up.
+        if (tenthsOfSecond >= 5) {
+            seconds++;
+        }
+
+        return String.format("%01d:%02d", minutes, seconds);
     }
 }

@@ -12,24 +12,17 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.plugins.hallowedsepulchre.model.CrossbowmanStatue;
-import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreFloor;
-import net.runelite.client.plugins.hallowedsepulchre.model.HallowedSepulchreSession;
-import net.runelite.client.plugins.hallowedsepulchre.model.StrangeTile;
+import net.runelite.client.plugins.hallowedsepulchre.model.*;
 import net.runelite.client.plugins.hallowedsepulchre.model.skillchallenge.SkillChallenge;
 import net.runelite.client.plugins.hallowedsepulchre.model.skillchallenge.SkillChallengeManager;
+import net.runelite.client.plugins.hallowedsepulchre.overlay.DebugOverlay;
 import net.runelite.client.plugins.hallowedsepulchre.overlay.LootOverlay;
 import net.runelite.client.plugins.hallowedsepulchre.overlay.ObstacleOverlay;
-import net.runelite.client.plugins.hallowedsepulchre.overlay.StopwatchInfobox;
 import net.runelite.client.plugins.hallowedsepulchre.overlay.TimerOverlay;
 import net.runelite.client.ui.overlay.OverlayManager;
-import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
-import net.runelite.client.util.RSTimeUnit;
 
 import javax.inject.Inject;
-import java.awt.image.BufferedImage;
 import java.time.Duration;
-import java.time.LocalTime;
 import java.util.Optional;
 
 @Slf4j
@@ -58,6 +51,9 @@ public class HallowedSepulchrePlugin extends Plugin {
     private LootOverlay lootOverlay;
 
     @Inject
+    private DebugOverlay debugOverlay;
+
+    @Inject
     private OverlayManager overlayManager;
 
     @Inject
@@ -65,9 +61,6 @@ public class HallowedSepulchrePlugin extends Plugin {
 
     @Inject
     private EventBus eventBus;
-
-    @Inject
-    private InfoBoxManager infoBoxManager;
 
     @Getter
     private SessionManager sessionManager;
@@ -77,9 +70,6 @@ public class HallowedSepulchrePlugin extends Plugin {
 
     @Getter
     private SkillChallengeManager skillChallengeManager;
-
-
-    private StopwatchInfobox floorTimeInfobox;
 
     @Provides
     HallowedSepulchreConfig getConfig(ConfigManager configManager)
@@ -95,15 +85,10 @@ public class HallowedSepulchrePlugin extends Plugin {
         skillChallengeManager = new SkillChallengeManager();
         lootTracker = new LootTracker(itemManager);
 
-//        final BufferedImage image = itemManager.getImage(ItemID.RING_OF_ENDURANCE, 1, false);
-//        floorTimeInfobox = new StopwatchInfobox(image, this);
-//        floorTimeInfobox.setText("1:31");
-
         overlayManager.add(overlay);
         overlayManager.add(timerOverlay);
         overlayManager.add(lootOverlay);
-
-        // infoBoxManager.addInfoBox(floorTimeInfobox);
+        overlayManager.add(debugOverlay);
 
         eventBus.register(lootTracker);
     }
@@ -115,24 +100,9 @@ public class HallowedSepulchrePlugin extends Plugin {
         overlayManager.remove(overlay);
         overlayManager.remove(timerOverlay);
         overlayManager.remove(lootOverlay);
-
-        // infoBoxManager.removeInfoBox(floorTimeInfobox);
+        overlayManager.remove(debugOverlay);
 
         eventBus.unregister(lootTracker);
-    }
-
-    @Subscribe
-    void onBeforeRender(BeforeRender beforeRender) {
-
-//        if (sessionManager.getCurrentSession().isPresent()) {
-//            long seconds = sessionManager.getCurrentFloor()
-//                    .map(floor -> floor.getDuration().getSeconds())
-//                    .orElse(0L);
-//
-//            LocalTime time = LocalTime.ofSecondOfDay(seconds);
-//
-//            floorTimeInfobox.setText(time.toString());
-//        }
     }
 
     @Subscribe
@@ -154,7 +124,7 @@ public class HallowedSepulchrePlugin extends Plugin {
             // Since this is a spawn event, it may trigger a new session and/or
             // floor.
             sessionManager.prepareSession();
-            final HallowedSepulchreFloor floor = sessionManager.getCurrentOrUpcomingFloor();
+            final HallowedSepulchreFloor floor = sessionManager.getCurrentOrUpcomingFloor(client);
             floor.addProjectile(maybeProjectile);
         });
     }
@@ -183,28 +153,30 @@ public class HallowedSepulchrePlugin extends Plugin {
 
         sessionManager.getCurrentFloor().ifPresent(floor -> {
             final int ticksElapsed = client.getVarbitValue(10417);
+            final int totalTicksElapsed = client.getVarbitValue(10393);
             final int floorTicksRemaining = client.getVarbitValue(10392);
             final boolean isTimerPaused = client.getVarbitValue(10413) == 1;
 
+            final HallowedSepulchreTimetracker timeTracker = sessionManager.demandCurrentSession().getTimeTracker();
+
             // The timer starts when the server timer begins to tick.
-            if (ticksElapsed == 1 && !floor.isTimerRunning()) {
-                log.debug("Starting timer.");
-
-                // The stopwatch starts 1 tick late.
-                floor.setStopwatchOffset(Duration.of(1, RSTimeUnit.GAME_TICKS));
-                floor.startTimer();
-            }
-
-            // Pauses the floor timer.
-            if (isTimerPaused && floor.isTimerRunning()) {
-                log.debug("Pausing timer.");
-                floor.stopTimer();
+            if (ticksElapsed > 0 && !isTimerPaused) {
+                timeTracker.setFloorTicks(ticksElapsed);
+                timeTracker.setOverallTicks(totalTicksElapsed);
             }
 
             // This flag gets set when the time expires so the skilling obstacles
             // can be highlighted a different color.
-            if (floorTicksRemaining == 1) {
-                floor.setHasTimeExpired(true);
+            if (floorTicksRemaining == 1 && !isTimerPaused) {
+                log.debug("Time limited exceeded. Starting backup timer.");
+
+                timeTracker.startBackupTimer();
+            }
+
+            // Pauses the floor timer.
+            if (isTimerPaused && !timeTracker.isPaused()) {
+                log.debug("Pausing timer.");
+                timeTracker.pause();
             }
         });
     }
@@ -212,27 +184,31 @@ public class HallowedSepulchrePlugin extends Plugin {
     @Subscribe
     public void onChatMessage(final ChatMessage chatMessage) {
 
-        ChatEvent.fromChatMessage(chatMessage).ifPresent(chatEvent -> {
-            log.debug("Chat event received: " + chatEvent);
-            final String message = chatMessage.getMessage();
+        sessionManager.getCurrentSession().ifPresent(session -> {
+            ChatEvent.fromChatMessage(chatMessage).ifPresent(chatEvent -> {
+                log.debug("Chat event received: " + chatEvent);
+                final String message = chatMessage.getMessage();
 
-            switch (chatEvent) {
-                case FLOOR_COMPLETED:
-                    sessionManager.demandCurrentSession().setCurrentFloor(null);
-                    break;
-                case FLOOR_TIME_POSTED:
-                    final Duration floorDuration = HallowedSepulchreUtil.extractFloorTime(message);
-                    final Optional<Duration> overallDuration = HallowedSepulchreUtil.extractOverallTime(message);
+                switch (chatEvent) {
+                    case FLOOR_COMPLETED:
+                        session.putCompletedFloor(makeCompletedFloor(session));
+                        session.setCurrentFloor(null);
+                        break;
+                    case FLOOR_TIME_POSTED:
+                        final Optional<Duration> overallDuration = HallowedSepulchreUtil.extractOverallTime(message);
 
-                    sessionManager.demandCurrentSession().addCompletedFloorDuration(floorDuration);
-                    overallDuration.ifPresent(duration -> sessionManager.demandCurrentSession().setOverallDuration(duration));
-                    break;
-                case OBELISK_EXIT:
-                case FLOOR_EXIT:
-                    sessionManager.demandCurrentSession().setCurrentFloor(null);
-                    sessionManager.endSession();
-                    break;
-            }
+                        // This will overwrite a CompletedFloor from the FLOOR_COMPLETED event.
+                        session.putCompletedFloor(makeCompletedFloor(session, message));
+                        overallDuration.ifPresent(session::setOverallDuration);
+                        break;
+                    case OBELISK_EXIT:
+                    case FLOOR_EXIT:
+                        session.getTimeTracker().reset();
+                        session.setCurrentFloor(null);
+                        sessionManager.endSession();
+                        break;
+                }
+            });
         });
     }
 
@@ -265,7 +241,7 @@ public class HallowedSepulchrePlugin extends Plugin {
 
             // Since this is a spawn event, it may trigger a new session and/or floor.
             sessionManager.prepareSession();
-            final HallowedSepulchreFloor floor = sessionManager.getCurrentOrUpcomingFloor();
+            final HallowedSepulchreFloor floor = sessionManager.getCurrentOrUpcomingFloor(client);
 
             switch (obstacleType) {
                 case STATUE:
@@ -288,6 +264,23 @@ public class HallowedSepulchrePlugin extends Plugin {
         });
     }
 
+    private CompletedFloor makeCompletedFloor(HallowedSepulchreSession session) {
+        final HallowedSepulchreFloor floor = sessionManager.demandCurrentFloor();
+        final Duration floorDuration = session.getTimeTracker().getCurrentFloorDuration();
+        final Duration overallDuration = session.getTimeTracker().getOverallDuration();
+
+        return new CompletedFloor(floor.getFloorNumber(), floorDuration, overallDuration);
+    }
+
+    private CompletedFloor makeCompletedFloor(HallowedSepulchreSession session, String timeMessage) {
+        final int floorNumber = HallowedSepulchreUtil.extractFloorNumber(timeMessage);
+        final Duration recordedFloorDuration = HallowedSepulchreUtil.extractFloorTime(timeMessage);
+        final Duration overallDuration = HallowedSepulchreUtil.extractOverallTime(timeMessage)
+                .orElse(session.getTimeTracker().getOverallDuration());
+
+        return new CompletedFloor(floorNumber, recordedFloorDuration, overallDuration);
+    }
+
     public Optional<HallowedSepulchreSession> getActiveSession() {
         return sessionManager.getCurrentSession();
     }
@@ -300,5 +293,9 @@ public class HallowedSepulchrePlugin extends Plugin {
         final Optional<Player> player = Optional.ofNullable(client.getLocalPlayer());
 
         return player.isPresent() && player.get().getWorldLocation().getRegionID() == REGION_LOBBY;
+    }
+
+    public boolean isInSepulchre() {
+        return getActiveSession().isPresent();
     }
 }

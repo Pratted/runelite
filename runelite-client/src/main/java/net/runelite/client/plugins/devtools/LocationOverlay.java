@@ -76,10 +76,19 @@ public class LocationOverlay extends OverlayPanel
 			int chunkY = (chunkData >> 3 & 0x7FF) * CHUNK_SIZE;
 			int chunkX = (chunkData >> 14 & 0x3FF) * CHUNK_SIZE;
 
+			int origin = instanceTemplateChunks[z][5][0];
+			int originY = (origin >> 3 & 0x7FF) * CHUNK_SIZE;
+			int originX = (origin >> 14 & 0x3FF) * CHUNK_SIZE;
+
 			panelComponent.getChildren().add(LineComponent.builder()
 				.left("Chunk " + localPoint.getSceneX() / CHUNK_SIZE + "," + localPoint.getSceneY() / CHUNK_SIZE)
 				.right(rotation + " " + chunkX + " " + chunkY)
 				.build());
+
+			panelComponent.getChildren().add(LineComponent.builder()
+					.left("Chunk Origin: ")
+					.right(originX + " " + originY)
+					.build());
 		}
 
 		panelComponent.getChildren().add(LineComponent.builder()
@@ -112,6 +121,11 @@ public class LocationOverlay extends OverlayPanel
 				.rightColor((region == regionID) ? Color.GREEN : Color.WHITE)
 				.build());
 		}
+
+		panelComponent.getChildren().add(LineComponent.builder()
+			.left("Region ID:")
+				.right(String.valueOf(regionID))
+				.build());
 
 		return super.render(graphics);
 	}
